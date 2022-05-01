@@ -2,9 +2,11 @@
 
 Demo Arduino firmware for Fibonacci182 Card with touch pads
 
+![Fibonacci182 Card Demo](https://i.giphy.com/media/JaKNcep0w1mnMVuv5z/giphy.gif)
+
 ![Fibonacci182 Card](f182-card.jpg)
 
-More information: [https://evilgeniuslabs.org/fibonacci128-card](https://evilgeniuslabs.org/fibonacci128-card)
+More information: [https://evilgeniuslabs.org/fibonacci182-card](https://evilgeniuslabs.org/fibonacci182-card)
 
 ### Dependencies
 
