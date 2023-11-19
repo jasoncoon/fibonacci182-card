@@ -36,10 +36,10 @@ CRGB leds[NUM_LEDS];
 // a count of how many there are.
 extern const TProgmemRGBGradientPalettePtr gGradientPalettes[];
 
-uint8_t gCurrentPaletteNumber = 0;
+uint8_t currentPaletteNumber = 0;
 
-CRGBPalette16 gCurrentPalette( CRGB::Black);
-CRGBPalette16 gTargetPalette( gGradientPalettes[0] );
+CRGBPalette16 currentPalette(CRGB::Black);
+CRGBPalette16 targetPalette(gGradientPalettes[0]);
 
 // ten seconds per color palette makes a good demo
 // 20-120 is better for deployment
@@ -72,31 +72,62 @@ uint16_t touchRaw[touchPointCount] = { 0, 0, 0, 0, 0, 0 };
 // capacitive touch sensor readings, mapped/scaled one one byte each (0-255)
 uint8_t touch[touchPointCount] = { 0, 0, 0, 0, 0, 0 };
 
+unsigned long touchMillis[touchPointCount] = { 0, 0, 0, 0, 0, 0 };
+
+
 // coordinates of the touch points
 uint8_t touchPointX[touchPointCount] = { 255, 127,   0,   0, 127, 255 };
 uint8_t touchPointY[touchPointCount] = {   0,   0,   0, 255, 255, 255 };
 
-uint8_t touchEnabled[touchPointCount] = { false, false, false, false, false, false };
+unsigned long tapMillis[touchPointCount] = { 0, 0, 0, 0, 0, 0 };
+
+boolean longTouched[touchPointCount] = { false, false, false, false, false, false };
+
+boolean tapped[touchPointCount] = { false, false, false, false, false, false };
+boolean doubleTapped[touchPointCount] = { false, false, false, false, false, false };
 
 boolean activeWaves = false;
 
 uint8_t offset = 0;
+
+uint8_t currentPatternIndex = 0;
+
+#include "touchWaves.h"
+#include "colorWaves.h"
 
 #include "vector.h"
 #include "boid.h"
 #include "attractor.h"
 #include "attract.h"
 
-void setup() {
+typedef void (*Pattern)();
+typedef Pattern PatternList[];
+
+PatternList patterns = {
+  attract,
+  colorWavesFibonacci,
+  radiusPalette,
+  anglePalette,
+  xyPalette,
+  xPalette,
+  yPalette
+};
+
+#define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
+
+const uint8_t patternCount = ARRAY_SIZE(patterns);
+
+void setup()
+{
   Serial.begin(115200);
   //  delay(3000);
 
-  touchEnabled[0] = touch0.begin();
-  touchEnabled[1] = touch1.begin();
-  touchEnabled[2] = touch2.begin();
-  touchEnabled[3] = touch3.begin();
-  touchEnabled[4] = touch4.begin();
-  touchEnabled[5] = touch5.begin();
+  touch0.begin();
+  touch1.begin();
+  touch2.begin();
+  touch3.begin();
+  touch4.begin();
+  touch5.begin();
 
   FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS);
   FastLED.setDither(false);
@@ -117,25 +148,30 @@ void loop() {
 
   handleTouch();
 
+  for (uint8_t i = 0; i < touchPointCount; i++) {
+    if (doubleTapped[i]) {
+      tapped[i] = false;
+      doubleTapped[i] = false;
+      tapMillis[i] = 0;
+      currentPatternIndex = (currentPatternIndex + 1) % patternCount;
+      break;
+    }
+  }
+
   // change to a new cpt-city gradient palette
   EVERY_N_SECONDS( secondsPerPalette ) {
-    gCurrentPaletteNumber = addmod8( gCurrentPaletteNumber, 1, gGradientPaletteCount);
-    gTargetPalette = gGradientPalettes[ gCurrentPaletteNumber ];
+    currentPaletteNumber = addmod8( currentPaletteNumber, 1, gGradientPaletteCount);
+    targetPalette = gGradientPalettes[ currentPaletteNumber ];
   }
 
   EVERY_N_MILLISECONDS(30) {
     // slowly blend the current palette to the next
-    nblendPaletteTowardPalette( gCurrentPalette, gTargetPalette, 8);
+    nblendPaletteTowardPalette( currentPalette, targetPalette, 8);
     offset++;
   }
 
   if (!activeWaves)
-    attract();
-    // colorWavesFibonacci();
-
-  // touchDemo();
-
-  // FastLED.show();
+    patterns[currentPatternIndex]();
 
   // insert a delay to keep the framerate modest
   FastLED.delay(1000 / FRAMES_PER_SECOND);
@@ -166,7 +202,50 @@ void handleTouch() {
       touchChanged = true;
     }
 
+    boolean touchedBefore = touch[i] > 127;
+
     touch[i] = map(touchRaw[i], touchMin[i], touchMax[i], 0, 255);
+
+    boolean touched = touch[i] > 127;
+
+    // calculate length of time touched
+    if (!touchedBefore && touched) {
+      touchMillis[i] = millis();
+      Serial.print(i);
+      Serial.println(" touched: true");
+    } else if (touchedBefore && !touched) {
+      touchMillis[i] = 0;
+      Serial.print(i);
+      Serial.println(" touched: false");
+    }
+
+    tapped[i] = false;
+    doubleTapped[i] = false;
+
+    // calculate taps & double taps
+    if (touchedBefore && !touched && !longTouched[i]) {
+      // tapped, check for double-tap
+      if (millis() - tapMillis[i] < 2000) {
+        doubleTapped[i] = true;
+      }
+
+      tapped[i] = true;
+
+      tapMillis[i] = millis();
+      Serial.print(i);
+      Serial.println(" tapped: true");
+    }
+
+    // calculate whether a touch point is being held
+    if (!longTouched[i] && touched && millis() - touchMillis[i] > 2000) {
+      longTouched[i] = true;
+      Serial.print(i);
+      Serial.println(" long touched: true");
+    } else if (longTouched[i] && !touched) {
+      longTouched[i] = false;
+      Serial.print(i);
+      Serial.println(" long touched: false");
+    }
 
     // // uncomment to display mapped/scaled touch values in the serial monitor/plotter
     //    Serial.print(touch[i]);
@@ -193,149 +272,4 @@ void handleTouch() {
   //
   //    touchChanged = false;
   //  }
-}
-
-// algorithm from http://en.wikipedia.org/wiki/Midpoint_circle_algorithm
-void drawCircle(int x0, int y0, int radius, const CRGB color, uint8_t thickness = 0)
-{
-  int a = radius, b = 0;
-  int radiusError = 1 - a;
-
-  if (radius == 0) {
-    addColorXY(x0, y0, color, thickness);
-    return;
-  }
-
-  while (a >= b)
-  {
-    addColorXY(a + x0, b + y0, color, thickness);
-    addColorXY(b + x0, a + y0, color, thickness);
-    addColorXY(-a + x0, b + y0, color, thickness);
-    addColorXY(-b + x0, a + y0, color, thickness);
-    addColorXY(-a + x0, -b + y0, color, thickness);
-    addColorXY(-b + x0, -a + y0, color, thickness);
-    addColorXY(a + x0, -b + y0, color, thickness);
-    addColorXY(b + x0, -a + y0, color, thickness);
-
-    b++;
-    if (radiusError < 0)
-      radiusError += 2 * b + 1;
-    else
-    {
-      a--;
-      radiusError += 2 * (b - a + 1);
-    }
-  }
-}
-
-const uint8_t waveCount = 8;
-
-// track the XY coordinates and radius of each wave
-uint16_t radii[waveCount];
-uint8_t waveX[waveCount];
-uint8_t waveY[waveCount];
-CRGB waveColor[waveCount];
-
-const uint16_t maxRadius = 512;
-
-void touchDemo() {
-  // fade all of the LEDs a small amount each frame
-  // increasing this number makes the waves fade faster
-  fadeToBlackBy(leds, NUM_LEDS, 30);
-
-  for (uint8_t i = 0; i < touchPointCount; i++) {
-    // start new waves when there's a new touch
-    if (touch[i] > 127 && radii[i] == 0) {
-      radii[i] = 32;
-      waveX[i] = touchPointX[i];
-      waveY[i] = touchPointY[i];
-      waveColor[i] = CHSV(random8(), 255, 255);
-    }
-  }
-
-  activeWaves = false;
-
-  for (uint8_t i = 0; i < waveCount; i++)
-  {
-    // increment radii if it's already been set in motion
-    if (radii[i] > 0 && radii[i] < maxRadius) radii[i] = radii[i] + 8;
-
-    // reset waves already at max
-    if (radii[i] >= maxRadius) {
-      activeWaves = true;
-      radii[i] = 0;
-    }
-
-    if (radii[i] == 0)
-      continue;
-
-    activeWaves = true;
-
-    CRGB color = waveColor[i];
-
-    uint8_t x = waveX[i];
-    uint8_t y = waveY[i];
-
-    // draw waves starting from the corner closest to each touch sensor
-    drawCircle(x, y, radii[i], color, 4);
-  }
-}
-
-// ColorWavesWithPalettes by Mark Kriegsman: https://gist.github.com/kriegsman/8281905786e8b2632aeb
-// This function draws color waves with an ever-changing,
-// widely-varying set of parameters, using a color palette.
-void fillWithColorWaves(CRGB* ledarray, uint16_t numleds, CRGBPalette16& palette, bool useFibonacciOrder) {
-  static uint16_t sPseudotime = 0;
-  static uint16_t sLastMillis = 0;
-  static uint16_t sHue16 = 0;
-
-  // uint8_t sat8 = beatsin88( 87, 220, 250);
-  uint8_t brightdepth = beatsin88( 341, 96, 224);
-  uint16_t brightnessthetainc16 = beatsin88( 203, (25 * 256), (40 * 256));
-  uint8_t msmultiplier = beatsin88(147, 23, 60);
-
-  uint16_t hue16 = sHue16;//gHue * 256;
-  uint16_t hueinc16 = beatsin88(113, 300, 1500);
-
-  uint16_t ms = millis();
-  uint16_t deltams = ms - sLastMillis ;
-  sLastMillis  = ms;
-  sPseudotime += deltams * msmultiplier;
-  sHue16 += deltams * beatsin88( 400, 5, 9);
-  uint16_t brightnesstheta16 = sPseudotime;
-
-  for ( uint16_t i = 0 ; i < fibonacciCount; i++) {
-    hue16 += hueinc16;
-    uint8_t hue8 = hue16 / 256;
-    uint16_t h16_128 = hue16 >> 7;
-    if ( h16_128 & 0x100) {
-      hue8 = 255 - (h16_128 >> 1);
-    } else {
-      hue8 = h16_128 >> 1;
-    }
-
-    brightnesstheta16 += brightnessthetainc16;
-    uint16_t b16 = sin16( brightnesstheta16  ) + 32768;
-
-    uint16_t bri16 = (uint32_t)((uint32_t)b16 * (uint32_t)b16) / 65536;
-    uint8_t bri8 = (uint32_t)(((uint32_t)bri16) * brightdepth) / 65536;
-    bri8 += (255 - brightdepth);
-
-    uint8_t index = hue8;
-    //index = triwave8( index);
-    index = scale8( index, 240);
-
-    CRGB newcolor = ColorFromPalette( palette, index, bri8);
-
-    uint16_t pixelnumber = i;
-    if (useFibonacciOrder) pixelnumber = fibonacciToPhysical[i];
-    if (pixelnumber >= numleds) continue;
-    pixelnumber = (numleds - 1) - pixelnumber;
-
-    nblend(ledarray[pixelnumber], newcolor, 128);
-  }
-}
-
-void colorWavesFibonacci() {
-  fillWithColorWaves(leds, NUM_LEDS, gCurrentPalette, true);
 }

@@ -31,7 +31,7 @@ void startAttract() {
   for (int i = 0; i < count; i++) {
     Boid boid = Boid(128, 240 - (i * 16));
     boid.mass = 1; // random(0.1, 2);
-    boid.velocity.x = ((float) random(40, 50)) / 100.0;
+    boid.velocity.x = ((float) random(60, 70)) / 100.0;
     boid.velocity.x *= direction;
     boid.velocity.y = 0;
     boid.colorIndex = i * 32;
@@ -40,7 +40,7 @@ void startAttract() {
   }
 }
 
-unsigned int attract() {
+void attract() {
   fadeToBlackBy(leds, NUM_LEDS, 2);
 
   int touchIndex = -1;
@@ -52,7 +52,7 @@ unsigned int attract() {
   }
 
   if (touchIndex > -1 && touchIndex < touchPointCount) {
-    if (thickness < 32)
+    if (thickness < 24)
       thickness++;
     attractor.location = PVector(touchPointX[touchIndex], touchPointY[touchIndex]);
   } else {
@@ -69,11 +69,9 @@ unsigned int attract() {
     boid.bounceOffBorders(0.25);
 
     boid.update();
-    CRGB color = ColorFromPalette(gCurrentPalette, boid.colorIndex);
+    CRGB color = ColorFromPalette(currentPalette, boid.colorIndex);
     addColorXY(boid.location.x, boid.location.y, color, thickness);
 
     boids[i] = boid;
   }
-
-  return 15;
 }
